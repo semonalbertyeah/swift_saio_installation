@@ -258,3 +258,69 @@ $ $HOME/swift/.probetests
 
 ! storage policy with policy_type = erausre_coding may not work well (no supported ec_type). 
 ! You can just comment out that storage_policy
+
+
+
+
+=======================
+ auth with keystone
+=======================
+
+------------------------
+ create account for swift
+------------------------
+
+! create swift user in keystone
+! you must export OS_USERNAME, OS_PASSWORD, OS_TENANT_NAME, OS_AUTH_URL. which has role admin.
+$ keystone user-create --name=swift --pass=swiftpass --email=swift@example.com
+$ keystone user-role-add --user=swift --tenant=service --role=admin
+
+! add object-storage service
+$ keystone service-create --name=swift --type=object-store --description="Openstac Storage"
+
+! specify the point for the Object Storage Service
+$ keystone endpoint-create --service-id=$(keystone service-list | awk '/ object-store / {print $2}') \
+  --publicurl='http://swiftproxyIP:8080/v1/AUTH_%(tenant_id)s' \
+  --internalurl='http://swiftproxyIP:8080/v1/AUTH_%(tenant_id)s' \
+  --adminurl=http://swiftproxyIP:8080
+
+
+-------------------------
+ setup auth for swift
+-------------------------
+! edit /etc/swift/proxy-server.conf
+! replace 'tempauth' in pipeline section with 'authtoken keystoneauth'
+
+! add the following sections
+
+# authtoken
+[filter:authtoken]
+paste.filter_factory = keystonemiddleware.auth_token:filter_factory
+# identity_uri: points to keystone admin service (adminURL)
+# used by middleware to query keystone about validity of auth tokens.
+# API ver not necessary
+identity_uri = http://192.168.111.211:35357/
+
+# swift service credentials
+# make sure they are created in keystone
+# This credentials are used to retrieve an admin token.
+# admin token will be used to authorize user tokens.
+admin_tenant_name = service
+admin_user = swift
+admin_password = swiftpass
+
+wift.cache: middleware will get the Swift memcache from the request environment.
+cache = swift.cache
+
+# if True: when validating a token, the service catalog is retrieved and stored in X-Service-Catalog header.
+# BUT Swift need no service catalog, hence False.
+include_service_catalog = False
+
+# if False: it will break public access, StaticWeb, FormPost, TempURL, and authenticated capabilities request.
+# hence True.
+delay_auth_decision = True
+
+# keystoneauth
+[filter:keystoneauth]
+use = egg:swift#keystoneauth
+operator_roles = admin, swiftoperator
