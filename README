@@ -111,8 +111,150 @@ rsync: used to sync files between hosts
 $ sudo cp $HOME/swift/doc/saio/rsyncd.conf /etc/
 $ sudo sed -i "s/<your-user-name>/${USER}/" /etc/rsyncd.conf
 
-! df
+! enable and start rsync
+
+! RHEL7
+$ sudo systemctl enable rsyncd
+$ sudo systemctl start rsyncd
+
+! RHEL6
+! edit /etc/xinetd.d/rsync
+disable = no
+
+$ sudo service xinetd restart
+
+! config selinux
+sudo setsebool -P rsync_full_access 1
+
+! verify rsync
+$ rsync rsync://pub@localhost/
+! result as following
+account6012
+account6022
+account6032
+account6042
+container6011
+container6021
+container6031
+container6041
+object6010
+object6020
+object6030
+object6040
+
+========================
+memcached
+========================
+! RHEL7
+sudo systemctl enable memcached
+sudo systemctl start memcached
+! RHEL6
+sudo chkconfig memcached on
+sudo service memcached start
+
+
+=====================
+ (optional) setting up rsyslog for individual logging
+=====================
+! use template conf file
+$ sudo cp $HOME/swift/doc/saio/rsyslog.d/10-swift.conf /etc/rsyslog.d/
+
+! edit the conf file to meet your need
+
+! edit /etc/rsyslog.conf
+$PrivDropToGroup adm
+
+! mkdir for log file (hourly for hourly logging configured in 10-swift.conf)
+$ sudo mkdir -p /var/log/swift/hourly
+
+! setup logging dir and start syslog
+sudo chown -R root:adm /var/log/swift
+sudo chmod -R g+w /var/log/swift
+sudo systemctl restart syslog
+
+! or starting service in RHEL6
+sudo service syslog start
+
+
+=============================
+ configuring each nodes
+=============================
+! remove existing swift conf
+$ sudo rm -rf /etc/swift
+
+! use template conf file for swift
+cd $HOME/swift/doc; sudo do cp -r saio/swift /etc/swift; cd -
+$ sudo chown -R ${USER}:${USER} /etc/swift
+
+! update <your-user-name> in conf file
+find /etc/swift/ -name \*.conf | xargs sudo sed -i "s/<your-user-name>/${USER}/"
+
+
+=================================
+ setting up scripts for running swift
+ script tools
+=================================
+! copy the SAIO scripts for restting this whole environment
+$ mkdir $HOME/bin
+$ cd $HOME/swift/doc; cp saio/bin/* $HOME/bin; cd -
+$ chmod +x $HOME/bin/*
+
+! if using a loopback device -> add an environment var
+$ echo "export SAIO_BLOCK_DEVICE=/srv/swift-disk" >> $HOME/.bashrc
+
+! if not using rsyslog -> remove the "find /var/log/swift..." line
+$ sed -i "/find \/var\/log\/swift/d" $HOME/bin/resetswift
+
+! install the sample configuration file for running tests
+$ cp $HOME/swift/test/sample.conf /etc/swift/test.conf
+
+! add an env var for running test. this env var is used by test scripts
+$ echo "export SWIFT_TEST_CONFIG_FILE=/etc/swift/test.conf" >> $HOME/.bashrc
+
+! add $HOME/bin to PATH
+$ echo "export PATH=${PATH}:$HOME/bin" >> $HOME/.bashrc
+
+! source .bashrc
+$ . $HOME/.bashrc
+
+! construct the initial rings using the provided script
+$ remakerings
+
+! verify unittest
+! unit tests do not require any swift daemons running.
+$ $HOME/swift/.unittests
+
+! startmain -> (proxy, account, container and object)
+! startmain just call "swift-init main start"
+$ startmain
+
+=============================
+ sample ops
+=============================
+! get X-Storage-Url and X-Auth-Token
+$ curl -v -H 'X-Storage-User: test:tester' -H 'X-Storage-Pass: testing' http://127.0.0.1:8080/auth/v1.0
+
+! check that you can get account
+$ curl -v -H 'X-Auth-Token: <token-from-x-auth-token-above>' <url-from-x-storage-url-above>
+
+! check that swift command provided by the python-swiftclient
+$ swift -A http://127.0.0.1:8080/auth/v1.0 -U tes:tester -K testing stat
+
+! functional tests:
+$ $HOME/swift/.functests
+
+! verfiy the prob
+$ $HOME/swift/.probetests
 
 
 
 
+=================================
+ some tips
+=================================
+! you may need to install liberasurecode manually
+! download it and install as README says
+! It may be installed in /usr/local/lib, then you need to include /usr/local/lib in /etc/ld.so.conf
+
+! storage policy with policy_type = erausre_coding may not work well (no supported ec_type). 
+! You can just comment out that storage_policy
